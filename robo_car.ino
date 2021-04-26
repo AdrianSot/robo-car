@@ -7,14 +7,18 @@ int motor1pinF = 4;
 int motor1pinB = 5;
 int motor2pinF = 6;
 int motor2pinB = 7;
-int buzzerPin = 8;
-int ledPin = 9;
+int ledPin = 8;
+int buzzerPin = 9;
 int pingPin = 10;
 int echoPin = 11;
 
 unsigned long lastCommand;
 unsigned long currentMillis;
 unsigned long lastMillis;
+
+unsigned long lastBuzzer;
+unsigned long lastObject;
+unsigned long frontObject;
 
 int objectDistance = 25;
 int waitTime = 25;
@@ -54,6 +58,9 @@ void setup() {
     lastMillis = millis();
     carState = STOP;
     input = "";
+    lastBuzzer = millis();
+    lastObject = millis();
+    frontObject = false;
 
     digitalWrite(ledPin, HIGH);
 }
@@ -102,14 +109,19 @@ void loop() {
 //Checks if there is an object in front
 bool isFrontObject(int pin, int distance, int wait) {
     int cm;
-    for (int i = 0; i < wait; i++) {
-        delay(1);
-        cm = ping(pingPin);
-        if (cm > distance) {
-            return false;
-        }
+    cm = ping(pingPin);
+    if(cm <= distance){
+      currentMillis = millis();
+      if(frontObject){
+        if(currentMillis-lastObject > wait) return true;
+      }else{
+        frontObject = true;
+        lastObject = currentMillis;
+      }
+    }else{
+      frontObject = false;
     }
-    return true;
+    return false;
 }
 
 //Buzzing sound
