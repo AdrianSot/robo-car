@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+<script>
+$.ajaxSetup({
+    timeout:1000,
+});
+$(document).ready(function(){
+  var fired = false;
+  $(".dirs").click(function(){
+    var t = $(this).attr('id');
+    moveCar(t);
+  });
+  $("body").keydown(function(e) {
+    kv = e.which;
+    if(fired) return;
+    fired = true;
+    if (kv == '37' || kv == '65') {
+       e.preventDefault();
+       moveCar("L");
+    }
+    if (kv == '38' || kv == '87') {
+       e.preventDefault();
+       moveCar("F");
+    }
+    if (kv == '39' || kv == '68') {
+       e.preventDefault();
+       moveCar("R");
+    }
+    if (kv == '40' || kv == '83') {
+       e.preventDefault();
+       moveCar("B");
+    }
+  });
+  $("body").keyup(function(e) {
+    if(kv == '37' || kv == '38' || kv == '39' || kv == '40' || 
+       kv == '65' || kv == '87' || kv == '68' || kv == '83'){
+       fired = false;
+       stopCar();
+    }
+  });
+});
+
+function moveCar(id){
+    ip = $('#ip').val();
+    Address = "http://" + ip + ":80/";
+    $.get(Address,{car: id});
+}
+function stopCar(){
+  	ip = $('#ip').val();
+    Address = "http://" + ip + ":80/";
+    $.get(Address,{car: "S"});
+}
+</script>
+<style>
+button {
+    background-color: #80ced6;
+    padding: 20px 20px;
+}
+* {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+};
+</style>
+</head>
+<body>
+<input type="hidden" id="ip" value="192.168.0.45" style="margin-bottom:20px">
+<div>
+<button id="F" class="dirs" style="margin-left:52px">W</button>
+</div>
+<div>
+<button id="L" class="dirs" style="display:inline" >A</button>
+<button onclick="stopCar()" style="display:inline">&nbsp</button>
+<button id="R" class="dirs" style="display:inline">D</button>
+</div>
+<button id="B" class="dirs" style="margin-left:52px">S&nbsp</button>
+</body>
+</html>

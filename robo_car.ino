@@ -10,15 +10,21 @@ int motor2pinB = 7;
 int ledPin = 8;
 int buzzerPin = 9;
 int pingPin = 10;
-int echoPin = 11;
+int speedPin = 11;
+int infraPin = 12;
+int echoPin = 13;
+
 
 unsigned long lastCommand;
 unsigned long currentMillis;
 unsigned long lastMillis;
 
 unsigned long lastBuzzer;
-unsigned long lastObject;
-unsigned long frontObject;
+unsigned long lastObjectFront;
+unsigned long lastObjectBack;
+bool frontObject;
+bool backObject;
+bool evadingFront, evadingBack;
 
 int objectDistance = 25;
 int waitTime = 25;
@@ -31,7 +37,9 @@ enum state {
 }
 carState;
 
-String input;
+char input;
+char format[4] = "car=";
+int formatPos = 0;
 
 void setup() {
 
@@ -41,68 +49,109 @@ void setup() {
     pinMode(motor1pinB, OUTPUT);
     pinMode(motor2pinF, OUTPUT);
     pinMode(motor2pinB, OUTPUT);
+    pinMode(speedPin, OUTPUT);
 
     Serial.begin(115200);
     esp8266.begin(57600); //Baud rate esp8266
 
     //Esp8266 setup
-    esp8266Serial("AT+RST\r\n", 5000, DEBUG); // Reset
-    esp8266Serial("AT+CWMODE=1\r\n", 5000, DEBUG); //Station mode Operation
-    esp8266Serial("AT+CWJAP=\"UbeeD566-2.4G\",\"6F38FAD566\"\r\n", 5000, DEBUG);
+    esp8266Serial("AT+RST\r\n", 4000, DEBUG); // Reset
+    esp8266Serial("AT+CWMODE=1\r\n", 3000, DEBUG); //Station mode Operation
+    esp8266Serial("AT+CWJAP=\"SSID\",\"PASSWORD\"\r\n", 5000, DEBUG);
     while (!esp8266.find("OK")) {}
-    esp8266Serial("AT+CIFSR\r\n", 5000, DEBUG); //IP
-    esp8266Serial("AT+CIPMUX=1\r\n", 5000, DEBUG);
-    esp8266Serial("AT+CIPSERVER=1,80\r\n", 5000, DEBUG);
+    esp8266Serial("AT+CIFSR\r\n", 3000, DEBUG); //IP
+    esp8266Serial("AT+CIPMUX=1\r\n", 3000, DEBUG);
+    esp8266Serial("AT+CIPSERVER=1,80\r\n", 3000, DEBUG);
 
     lastCommand = millis();
     lastMillis = millis();
     carState = STOP;
     input = "";
     lastBuzzer = millis();
-    lastObject = millis();
+    lastObjectFront = millis();
+    lastObjectBack = millis();
+    
     frontObject = false;
+    backObject = false;
+    evadingFront = false;
+    evadingBack = false;
 
     digitalWrite(ledPin, HIGH);
+    analogWrite(speedPin, 150);
 }
 
 void loop() {
-    //Input from esp8266
     while (esp8266.available()) {
-        input += (char) esp8266.read();
+      input = (char) esp8266.read();
+      if(formatPos >= 0 && formatPos < 4){
+        if(format[formatPos] == input) formatPos++;
+        else formatPos = 0;
+      }else if(formatPos == 4){
+        switch(input){
+          case 'F':
+          case 'B':
+          case 'L':
+          case 'R':
+          case 'S':
+            moveCar(input);
+            break;
+        }
+        if (DEBUG) Serial.println(input);
+        formatPos = 0;
+      }
     }
 
-    //Process input and check for command
-    if (input.length() > 200) {
-        int index = input.indexOf("car");
-        if (index != -1) {
-            if (index + 6 < input.length()) {
-                String c1 = input.substring(index, index + 3);
-                String c2 = input.substring(index + 4, index + 6);
-                if (DEBUG) {
-                    Serial.println(c1);
-                    Serial.println(c2);
-                }
-                moveCar(c2);
-                input = input.substring(index + 7);
-            } else input = input.substring(index);
-        } else input = "";
+    //Move car if stopped and object in front or back
+    if (carState == STOP) {
+        if (isFrontObject(pingPin, objectDistance, waitTime)) {
+            evadingFront = true;
+            moveCar('B');
+        }
+        if (isBackObject(pingPin, waitTime)) {
+            evadingBack = true;
+            moveCar('F');
+        }
     }
 
-    //Stop if object detected
+    //Stop car after evading object
+    if(evadingFront && !isFrontObject(pingPin, objectDistance, waitTime)) {
+      moveCar('S');
+      evadingFront = false; 
+    }
+    if(evadingBack && !isBackObject(pingPin, waitTime)) {
+      moveCar('S');
+      evadingBack = false;
+    }
+
+    //Stop if object in front detected
     if (carState == FRONT) {
         if (isFrontObject(pingPin, objectDistance, waitTime)) {
-            carState = STOP;
-            stopMovement();
+            moveCar('S');
             buzz(buzzerPin);
         }
     }
 
-    //Stop if no input
+    //Stop if object in back detected
+    if (carState == BACK) {
+        if (isBackObject(pingPin, waitTime)) {
+            moveCar('S');
+            buzz(buzzerPin);
+        }
+    }
+    
     currentMillis = millis();
+    
+    //Stop buzzer after 40 millis
+    if(currentMillis - lastBuzzer > 40){
+        digitalWrite(buzzerPin,LOW);
+    }
+    
+    //Stop if no input
     if (currentMillis - lastCommand > 5000) {
-        stopMovement();
+        moveCar('S');
         lastCommand = millis();
     }
+
 
 }
 
@@ -113,10 +162,10 @@ bool isFrontObject(int pin, int distance, int wait) {
     if(cm <= distance){
       currentMillis = millis();
       if(frontObject){
-        if(currentMillis-lastObject > wait) return true;
+        if(currentMillis-lastObjectFront > wait) return true;
       }else{
         frontObject = true;
-        lastObject = currentMillis;
+        lastObjectFront = currentMillis;
       }
     }else{
       frontObject = false;
@@ -124,33 +173,46 @@ bool isFrontObject(int pin, int distance, int wait) {
     return false;
 }
 
+//Checks if there is an object in the back
+bool isBackObject(int pin, int wait) {
+    bool isObject;
+    isObject = !digitalRead(infraPin);
+    if(isObject){
+      currentMillis = millis();
+      if(backObject){
+        if(currentMillis-lastObjectBack > wait) return true;
+      }else{
+        backObject = true;
+        lastObjectBack = currentMillis;
+      }
+    }else{
+      backObject = false;
+    }
+    return false;
+}
+
 //Buzzing sound
 void buzz(int pin) {
+    lastBuzzer = millis();
     digitalWrite(pin, HIGH);
-    delay(15);
-    digitalWrite(pin, LOW);
-    delay(25);
-    digitalWrite(pin, HIGH);
-    delay(15);
-    digitalWrite(pin, LOW);
 }
 
 //Moves car in given direction
-void moveCar(String dir) {
+void moveCar(char dir) {
     lastCommand = millis();
-    if (dir == "FW") {
+    if (dir == 'F') {
         carState = FRONT;
         moveForward();
-    } else if (dir == "BW") {
+    } else if (dir == 'B') {
         carState = BACK;
         moveBackward();
-    } else if (dir == "LT") {
+    } else if (dir == 'L') {
         carState = LEFT;
         turnLeft();
-    } else if (dir == "RT") {
+    } else if (dir == 'R') {
         carState = RIGHT;
         turnRight();
-    } else {
+    } else if (dir == 'S'){
         carState = STOP;
         stopMovement();
     }
